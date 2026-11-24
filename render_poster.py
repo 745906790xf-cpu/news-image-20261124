@@ -1,171 +1,163 @@
-#!/usr/bin/env python3
-"""Draw poster.png: a newspaper front page summing up world news of Tuesday
-24 November 2026. Every headline verified against wire reports on the day
-(CNN/Al Jazeera/The Times, Nikkei/Morningstar, Reuters/CNN/WSJ, AP via
-Al Jazeera, Bloomberg via Japan Times, White House fact sheet via SCMP/
-BusinessWorld, BBC via Polygon/Xinhua). Pillow only.
-Run: python3 render_poster.py  -> writes poster.png beside this file."""
+"""Draw the 24 November 2026 world-news poster.
 
-from pathlib import Path
+A single 1024x1024 newspaper front page: masthead, one lead story, six
+story cards in two columns, and an "Also today" strip at the bottom.
+Run it directly or through main.py; the output is deterministic.
+"""
 
 from PIL import Image, ImageDraw, ImageFont
 
-HERE = Path(__file__).resolve().parent
-SERIF_B = "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf"
-SERIF = "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"
-SERIF_I = "/usr/share/fonts/truetype/liberation/LiberationSerif-Italic.ttf"
-SANS_B = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
-SANS = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+SIZE = 1024
+PAPER = (248, 244, 232)
+INK = (18, 18, 18)
+RULE = (18, 18, 18)
+ACCENT = (148, 28, 28)
+MUTED = (90, 86, 76)
 
-W = H = 1024
-PAPER = (247, 243, 234)
-INK = (20, 20, 20)
-RED = (179, 35, 27)
-NAVY = (29, 58, 95)
-GREY = (90, 86, 78)
-RULE = (60, 56, 48)
+FONT_DIR = "/usr/share/fonts/truetype/dejavu"
 
 
-def font(path, size):
-    return ImageFont.truetype(path, size)
+def font(name, size):
+    return ImageFont.truetype(f"{FONT_DIR}/{name}", size)
 
 
-def wrap(draw, text, fnt, max_w):
-    words, lines, cur = text.split(), [], ""
-    for word in words:
-        trial = f"{cur} {word}".strip()
-        if draw.textlength(trial, font=fnt) <= max_w:
-            cur = trial
+SERIF_BOLD = lambda s: font("DejaVuSerif-Bold.ttf", s)
+SANS_BOLD = lambda s: font("DejaVuSans-Bold.ttf", s)
+SANS = lambda s: font("DejaVuSans.ttf", s)
+
+
+def wrap(draw, text, fnt, width):
+    """Greedy word wrap returning a list of lines that fit width."""
+    lines, current = [], ""
+    for word in text.split():
+        trial = f"{current} {word}".strip()
+        if draw.textlength(trial, font=fnt) <= width:
+            current = trial
         else:
-            lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
+            if current:
+                lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
     return lines
 
 
-def block(draw, x, y, max_w, kicker, headline, deck, head_size=25):
-    draw.text((x, y), kicker, font=font(SANS_B, 14), fill=RED)
+def centred(draw, y, text, fnt, fill=INK, x0=0, x1=SIZE):
+    w = draw.textlength(text, font=fnt)
+    draw.text(((x0 + x1 - w) / 2, y), text, font=fnt, fill=fill)
+    return y + fnt.size + 4
+
+
+def headline_block(draw, x, y, width, kicker, headline, summary,
+                   head_size=30, sum_size=19, gap=8):
+    draw.text((x, y), kicker, font=SANS_BOLD(15), fill=ACCENT)
     y += 22
-    hf = font(SERIF_B, head_size)
-    for line in wrap(draw, headline, hf, max_w):
-        draw.text((x, y), line, font=hf, fill=INK)
-        y += head_size + 5
-    y += 2
-    df = font(SERIF, 15)
-    for line in wrap(draw, deck, df, max_w):
-        draw.text((x, y), line, font=df, fill=(52, 50, 44))
-        y += 20
+    for line in wrap(draw, headline, SANS_BOLD(head_size), width):
+        draw.text((x, y), line, font=SANS_BOLD(head_size), fill=INK)
+        y += head_size + 4
+    y += gap - 4
+    for line in wrap(draw, summary, SANS(sum_size), width):
+        draw.text((x, y), line, font=SANS(sum_size), fill=MUTED)
+        y += sum_size + 5
     return y
 
 
-def globe(draw, cx, cy, r):
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=NAVY, width=3)
-    for k in (-0.66, -0.33, 0.0, 0.33, 0.66):
-        w = r * (1 - k * k) ** 0.5
-        draw.ellipse([cx - w, cy - r, cx + w, cy + r], outline=(120, 145, 175), width=1)
-        draw.line([cx - w, cy + k * r, cx + w, cy + k * r], fill=(120, 145, 175), width=1)
-    draw.line([cx - r, cy, cx + r, cy], fill=(120, 145, 175), width=1)
-    # dateline dots: (dx, dy) as fractions of r, label, label offset in px
-    spots = [
-        (-0.62, -0.28, "WASHINGTON", 9, 2),
-        (0.02, -0.42, "KYIV", -14, -16),
-        (0.30, -0.05, "ANTALYA", 9, -6),
-        (0.58, -0.30, "MANILA", -16, 9),
-        (0.52, 0.18, "BENGHAZI", -92, -6),
-        (-0.48, 0.42, "LONDON", 9, -6),
-    ]
-    for dx, dy, label, tx, ty in spots:
-        px, py = cx + dx * r, cy + dy * r
-        draw.ellipse([px - 5, py - 5, px + 5, py + 5], fill=RED)
-        draw.text((px + tx, py + ty), label, font=font(SANS_B, 11), fill=NAVY)
+def build_poster(path):
+    img = Image.new("RGB", (SIZE, SIZE), PAPER)
+    draw = ImageDraw.Draw(img)
+    margin = 44
+    right = SIZE - margin
 
+    # Masthead.
+    y = 30
+    y = centred(draw, y, "THE WORLD TODAY", SERIF_BOLD(62))
+    draw.line([(margin, y + 2), (right, y + 2)], fill=RULE, width=3)
+    draw.line([(margin, y + 8), (right, y + 8)], fill=RULE, width=1)
+    y += 16
+    draw.text((margin, y), "Tuesday, 24 November 2026",
+              font=SANS_BOLD(18), fill=INK)
+    tag = "One image  •  One day  •  The world in a page"
+    w = draw.textlength(tag, font=SANS(18))
+    draw.text((right - w, y), tag, font=SANS(18), fill=MUTED)
+    y += 34
+    draw.line([(margin, y), (right, y)], fill=RULE, width=2)
 
-def main():
-    img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-    M = 44  # page margin
+    # Lead story: COP31.
+    y += 18
+    y = headline_block(
+        draw, margin, y, right - margin,
+        "CLIMATE  —  LEAD STORY",
+        "COP31 talks collapse without a deal",
+        "Negotiators leave the summit with no final agreement, as "
+        "climate finance and fossil-fuel language stay unresolved.",
+        head_size=44, sum_size=21)
+    y += 6
+    draw.line([(margin, y), (right, y)], fill=RULE, width=1)
 
-    # Masthead
-    title = "THE WORLD TODAY"
-    tf = font(SERIF_B, 58)
-    tw = d.textlength(title, font=tf)
-    d.text(((W - tw) / 2, 26), title, font=tf, fill=INK)
-    d.line([M, 100, W - M, 100], fill=INK, width=3)
-    d.line([M, 106, W - M, 106], fill=INK, width=1)
-    dateline = "TUESDAY · 24 NOVEMBER 2026 · THE DAY'S WORLD NEWS ON ONE PAGE"
-    df = font(SANS_B, 16)
-    dw = d.textlength(dateline, font=df)
-    d.text(((W - dw) / 2, 114), dateline, font=df, fill=NAVY)
-    d.line([M, 140, W - M, 140], fill=RULE, width=1)
-
-    # Lead story, left; globe, right
-    y = block(
-        d, M, 156, 520,
-        "CLIMATE — LEAD STORY",
-        "COP31 collapses in Antalya",
-        "The first climate summit to end with no deal since 2009, as oil "
-        "states block any mention of fossil fuels and more than 130 nations "
-        "balk at a text that 'moves us backwards on the science'.",
-        head_size=34,
-    )
-    globe(d, 800, 262, 118)
-    cap = "Where today's stories broke"
-    cf = font(SERIF_I, 14)
-    d.text((800 - d.textlength(cap, font=cf) / 2, 392), cap, font=cf, fill=GREY)
-    d.line([M, 424, W - M, 424], fill=RULE, width=2)
-
-    # Six secondary stories in two rows of three
+    # Six stories, two columns x three rows.
     stories = [
-        ("MARKETS & AI", "Nvidia brings back Jensen Huang as CEO",
-         "Board reverses course 11 days after his resignation; shares jump "
-         "about 30% as Trump backs the return."),
-        ("WAR AT SEA", "Ukraine sinks Russian corvette off Libya",
-         "Seven sea drones hit the Merkury in Benghazi; a helicopter and a "
-         "cargo ship were struck too."),
-        ("UKRAINE", "Russian strikes kill at least 14 in Kyiv region",
-         "A block of flats collapses in Dymer; rescuers hunt for survivors "
-         "under the rubble."),
-        ("WASHINGTON", "Democrats take 258 House seats",
-         "Largest House majority since 1992; the party also holds the "
-         "Senate as divided government returns."),
-        ("SPACE", "Intel warns of Russian nuclear satellite",
-         "NATO vows to defend space as reports say Sputnik-S could launch "
-         "in December."),
-        ("ASIA", "Trump offers Philippines $2.4bn package",
-         "Mostly loans plus $400m in military financing to deter China in "
-         "the South China Sea."),
+        ("TECHNOLOGY",
+         "Nvidia brings back Jensen Huang as chief executive",
+         "The chipmaker rehires its co-founder to lead the company "
+         "again as demand for AI hardware surges."),
+        ("WAR AT SEA",
+         "Ukraine says it sank a Russian frigate off Libya",
+         "Kyiv claims uncrewed boats struck the Merkury in the "
+         "Mediterranean, far from home waters."),
+        ("UKRAINE",
+         "Russian strikes kill at least 14 near Kyiv",
+         "Overnight attacks hit the Kyiv region in the latest deadly "
+         "barrage on civilian areas."),
+        ("UNITED STATES",
+         "Democrats retake the House with 258 seats",
+         "The opposition wins a clear majority in the lower chamber, "
+         "reshaping the balance in Washington."),
+        ("SPACE",
+         "Russia may put a nuclear weapon in orbit",
+         "US intelligence warns of a possible launch next month, and "
+         "NATO vows to defend space."),
+        ("ASIA",
+         "Trump offers the Philippines a $2.4bn package",
+         "Mostly loans, plus $400m in military aid, in a new push to "
+         "shore up the Pacific ally."),
     ]
-    col_w = (W - 2 * M - 2 * 28) // 3
-    for i, (kicker, headline, deck) in enumerate(stories):
-        x = M + (i % 3) * (col_w + 28)
-        y = 442 + (i // 3) * 196
-        if i % 3:
-            d.line([x - 14, y, x - 14, y + 168], fill=(190, 182, 164), width=1)
-        block(d, x, y, col_w, kicker, headline, deck, head_size=23)
-    d.line([M, 838, W - M, 838], fill=RULE, width=2)
+    col_w = (right - margin - 28) // 2
+    row_y = y + 16
+    row_h = 168
+    for i, (kicker, head, summ) in enumerate(stories):
+        cx = margin + (i % 2) * (col_w + 28)
+        cy = row_y + (i // 2) * row_h
+        if i % 2 == 1:
+            draw.line([(margin + col_w + 14, cy + 4),
+                       (margin + col_w + 14, cy + row_h - 16)],
+                      fill=(200, 194, 178), width=1)
+        headline_block(draw, cx, cy, col_w, kicker, head, summ,
+                       head_size=24, sum_size=17, gap=6)
+        if i // 2 < 2:
+            draw.line([(margin, cy + row_h - 6), (right, cy + row_h - 6)],
+                      fill=(200, 194, 178), width=1)
 
-    # Also-today strip
-    d.text((M, 852), "ALSO TODAY", font=font(SANS_B, 15), fill=RED)
-    also = (
-        "GTA VI hacker Arion Kurtaj gets seven years — and walks free the "
-        "same day · GTA VI launched on Nov 19 after a 13-year wait"
-    )
-    y = 876
-    af = font(SERIF, 17)
-    for line in wrap(d, also, af, W - 2 * M):
-        d.text((M, y), line, font=af, fill=INK)
-        y += 23
+    # Also today strip.
+    y = row_y + 3 * row_h + 10
+    draw.rectangle([(margin, y), (right, y + 92)], outline=RULE, width=2)
+    draw.text((margin + 16, y + 12), "ALSO TODAY",
+              font=SANS_BOLD(16), fill=ACCENT)
+    draw.text((margin + 16, y + 38),
+              "GTA VI hacker Kurtaj jailed for 7 years — freed the same day",
+              font=SANS_BOLD(19), fill=INK)
+    draw.text((margin + 16, y + 64),
+              "Grand Theft Auto VI launched on 19 November",
+              font=SANS(18), fill=MUTED)
 
-    # Footer
-    d.line([M, 958, W - M, 958], fill=INK, width=1)
-    foot = "One page, one day — the world on Tuesday 24 November 2026."
-    ff = font(SERIF_I, 16)
-    d.text(((W - d.textlength(foot, font=ff)) / 2, 966), foot, font=ff, fill=GREY)
+    # Footer.
+    fy = SIZE - 34
+    foot = "Sources: CNN, Reuters, AP, BBC, Al Jazeera, Nikkei, Bloomberg, SCMP"
+    centred(draw, fy, foot, SANS(14), fill=MUTED)
 
-    img.save(HERE / "poster.png", optimize=True)
-    print("wrote", HERE / "poster.png", img.size)
+    img.save(path, format="PNG")
+    return path
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    build_poster(sys.argv[1] if len(sys.argv) > 1 else "poster.png")
